@@ -5,27 +5,33 @@ const app = express()
 const port = process.env.PORT || 5000;
 
 const connectDB = require('./db/connectDB');
-const mealsRoutes = require('./routes/findAllMeals/index')
+const mealsRoutes = require('./routes/findAllMeals/index');
+const findAMeal = require('./routes/findAMeal/index');
+const updateLike = require('./routes/updateLike/index');
+const membership = require('./routes/membership/index')
 
-app.use(cors());
+
+
+app.use(cors({
+    origin: [
+        "http://localhost:5174",
+        "http://localhost:5173"
+    ]
+}));
 app.use(express.json());
 
 
-app.use(mealsRoutes)
+app.use(mealsRoutes);
+app.use(findAMeal)
+app.use(updateLike)
+app.use(membership)
 
 
 
-// console.log(meals)
 
-// const mealCollection = mongoose.model('meal', mongoose.Schema({}), 'meals')
-// app.get('/meals', async (req, res) => {
-//     try {
-//         const result = await mealCollection.find();
-//         res.send(result);
-//     } catch (error) {
-//         console.log(error)
-//     }
-// })
+
+
+
 
 app.get('/', (req, res) => {
     res.send('MealNest is running...')

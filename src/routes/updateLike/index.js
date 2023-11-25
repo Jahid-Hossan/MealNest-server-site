@@ -1,9 +1,9 @@
 const express = require('express');
-const findAllMeals = require('../../apis/Meals/findAllMeals');
 const router = express.Router();
+const updateLike = require('../../apis/Meals/updateLike/updateLike')
 
 // const mealCollection = mongoose.model('meal', mongoose.Schema({}), 'meals')
-router.get('/meals', findAllMeals)
+router.patch('/meals/:id', updateLike)
 
 
 module.exports = router;
