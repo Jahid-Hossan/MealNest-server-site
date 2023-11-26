@@ -5,7 +5,7 @@ const memberships = require("../../models/membership/membership");
 const allMemberships = async (req, res) => {
     try {
 
-        const query = { price: { $ne: 'free' } }
+        // const query = { price: { $ne: 'free' } }
 
         const options = {
             sort: {
@@ -13,7 +13,7 @@ const allMemberships = async (req, res) => {
             }
         };
 
-        const result = await memberships.find(query,).sort(options.sort);
+        const result = await memberships.find().sort(options.sort);
         res.send(result);
 
     } catch (error) {
