@@ -23,7 +23,9 @@ const createToken = require('./src/routes/createToken/index');
 app.use(cors({
     origin: [
         "http://localhost:5174",
-        "http://localhost:5173"
+        "http://localhost:5173",
+        "https://meal-nest-hub.web.app",
+        "https://meal-nest-hub.firebaseapp.com"
     ]
 }));
 app.use(express.json());
@@ -60,6 +62,7 @@ const reviewsCollection = client.db(DBname).collection("reviews");
 const mealRequestCollection = client.db(DBname).collection("mealRequest");
 const mealsCollection = client.db(DBname).collection("meals");
 const membershipsCollection = client.db(DBname).collection("memberships");
+const paymentsCollection = client.db(DBname).collection("payments");
 
 //middleware
 
@@ -94,6 +97,26 @@ const verifyAdmin = async (req, res, next) => {
 
 // add user
 
+app.get('/users/admin/:email', verifyToken, async (req, res) => {
+    try {
+        const email = req.params.email;
+
+        if (email !== req.decoded.email) {
+            return res.status(403).send({ massage: "unauthorized access" })
+        }
+        const query = { email: email }
+        const user = await userCollection.findOne(query)
+        let admin = false;
+        if (user) {
+            admin = user?.role === 'Admin';
+        }
+        // console.log(admin, 'admin')
+        res.send({ admin })
+    } catch (error) {
+        console.log(error)
+    }
+})
+
 app.get('/users', verifyToken, async (req, res) => {
     try {
         // console.log('hitted')
@@ -118,26 +141,24 @@ app.get('/users', verifyToken, async (req, res) => {
 
 app.get('/all-users', async (req, res) => {
     try {
-        const userName = req.query;
-        const userEmail = req.query.userEmail;
+        const text = req.query.text;
 
-        console.log(typeof (userName))
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || ITEMS_PER_PAGE
 
         const query = {};
-
-        if (userName) {
-            query.name = { $regex: new RegExp(userName, 'i') };
+        if (text) {
+            query.$or = [
+                { name: { $regex: new RegExp(text, 'i') } },
+                { email: { $regex: new RegExp(text, 'i') } }
+            ];
         }
-
-        if (userEmail) {
-            query.email = { $regex: new RegExp(userEmail, 'i') };
-        }
-
-
         const memberships = await membershipsCollection.find().toArray();
-        const result = await userCollection.find(query).toArray();
-        res.send({ result, memberships });
-        console.log('result', result, memberships)
+        const totalUsers = await userCollection.countDocuments(query);
+        const totalPages = Math.ceil(totalUsers / limit);
+        const result = await userCollection.find(query).skip((page - 1) * limit).limit(limit).toArray();
+        res.send({ result, memberships, totalPages, totalUsers, currentPage: page });
+        console.log('result', result.length)
     } catch (error) {
         console.log(error)
     }
@@ -212,9 +233,58 @@ app.post('/reviews', async (req, res) => {
     try {
         const reviewData = req.body;
         const result = await reviewsCollection.insertOne(reviewData);
+
+        const query = { _id: new ObjectId(reviewData.mealId) };
+        const ratingQuery = { mealId: reviewData.mealId }
+        const ratingsCollection = await reviewsCollection.find(ratingQuery).toArray()
+        console.log(ratingsCollection)
+        let ratingNumber = 0
+        const ratings = ratingsCollection.map(rating => ratingNumber = ratingNumber + parseInt(rating.rating))
+        const avgRating = ratingNumber / ratingsCollection.length
+
+        const reviewInc = {
+            $inc: {
+                reviews: 1
+            },
+            $set: {
+                rating: avgRating
+            }
+        };
+        const updateMealReview = await mealsCollection.updateOne(query, reviewInc)
+
         res.send(result);
     } catch (error) {
         console.log(error)
+    }
+})
+
+
+app.get('/all-reviews', async (req, res) => {
+    try {
+        const filter = req.query;
+        const options = {
+            sort: {
+                likes: filter.sortLikes === 'asc' ? 1 : -1,
+                reviews: filter.sortReviews === 'asc' ? 1 : -1
+            }
+        };
+
+        console.log(filter)
+        const AllReviews = await reviewsCollection.find().toArray();
+
+        const mealReviewIds = [];
+        const getMealReviewsIds = AllReviews.map(review => {
+            return mealReviewIds.push(review.mealId)
+        })
+
+        const objectIds = mealReviewIds.map(id => new ObjectId(id));
+        const mealRequestQuery = { _id: { $in: objectIds } };
+        const result = await mealsCollection.find(mealRequestQuery).toArray();
+
+        res.send({ result, AllReviews })
+
+    } catch (error) {
+
     }
 })
 
@@ -252,6 +322,70 @@ app.delete('/reviews/:id', async (req, res) => {
 
 
 // meal request
+
+app.get('/all-meals', async (req, res) => {
+    try {
+        const email = req.query.email;
+        const query = {
+            adminEmail: email
+        }
+        const result = await mealsCollection.find(query).toArray()
+        res.send(result)
+    } catch (error) {
+
+    }
+})
+
+app.get('/serve-meals', verifyToken, async (req, res) => {
+    try {
+        // console.log(query)
+        const filter = req.query;
+        console.log(filter);
+        const query = {
+            email: { $regex: filter.search, $options: 'i' }
+        };
+        const options = {
+            sort: {
+                status: 'pending' ? -1 : 1
+            }
+        };
+
+        const mealRequest = await mealRequestCollection.find(query, options).toArray();
+        // res.send(result)
+
+        const mealRequestIds = [];
+        const getMealRequestIds = mealRequest.map(meal => {
+            return mealRequestIds.push(meal.mealId)
+        })
+
+        const objectIds = mealRequestIds.map(id => new ObjectId(id));
+        const mealRequestQuery = { _id: { $in: objectIds } };
+        const result = await mealsCollection.find(mealRequestQuery).toArray();
+
+        res.send({ result, mealRequest })
+    } catch (error) {
+        console.log(error)
+    }
+})
+
+app.patch('/serve/:id', async (req, res) => {
+    try {
+        const id = req.params.id;
+        console.log(id)
+        const query = { _id: new ObjectId(id) }
+        const serve = {
+            $set: {
+                status: "delivered"
+            }
+        }
+
+        const result = await mealRequestCollection.updateOne(query, serve);
+        res.send(result)
+    } catch (error) {
+        console.log(error)
+    }
+})
+
 app.get('/requestMeals', verifyToken, async (req, res) => {
     try {
         const userEmail = req.query.email;
@@ -274,6 +408,45 @@ app.get('/requestMeals', verifyToken, async (req, res) => {
 
         res.send({ result, reviewRes, mealRequest })
         // console.log(result, reviewRes)
+    } catch (error) {
+        console.log(error)
+    }
+})
+
+
+app.post('/add-meals', async (req, res) => {
+    try {
+        const mealData = req.body;
+        console.log(mealData)
+        const result = await mealsCollection.insertOne(mealData)
+        res.send(result)
+    } catch (error) {
+        console.log(error)
+    }
+})
+
+app.patch('/update-meals/:id', async (req, res) => {
+    try {
+        const id = req.params.id
+        const query = { _id: new ObjectId(id) }
+        const data = req.body;
+        console.log(data)
+        const updatedDoc = {
+            $set: {
+                title: data.title,
+                type: data.type,
+                image: data.image,
+                description: data.description,
+                ingredients: data.ingredients,
+                price: data.price,
+                time: data.time,
+                adminName: data.adminName,
+                adminEmail: data.adminEmail,
+            }
+        }
+
+        const result = await mealsCollection.updateOne(query, updatedDoc)
+        res.send(result)
     } catch (error) {
         console.log(error)
     }
@@ -320,6 +493,81 @@ app.get('/upcoming', async (req, res) => {
     } catch (error) {
         console.log(error)
 
+    }
+})
+
+app.get('/upcoming', async (req, res) => {
+    try {
+        const query = { upcoming: 'true' }
+
+        const result = await mealsCollection.find(query).toArray()
+        // console.log(result)
+
+        res.send(result);
+    } catch (error) {
+        console.log(error)
+
+    }
+})
+
+app.get('/upcoming-meals', async (req, res) => {
+    try {
+        const query = { upcoming: 'true' }
+
+        const result = await mealsCollection.find(query).toArray()
+        // console.log(result)
+
+        res.send(result);
+    } catch (error) {
+        console.log(error)
+
+    }
+})
+
+app.patch('/upcoming-meals/:id', async (req, res) => {
+    try {
+        const id = req.params.id
+        const query = { _id: new ObjectId(id) }
+        const newData = {
+            $set: {
+                upcoming: 'false'
+            }
+        }
+        const result = await mealsCollection.updateOne(query, newData);
+        // console.log(result)
+
+        res.send(result);
+    } catch (error) {
+        console.log(error)
+
+    }
+})
+
+
+// payments
+
+app.post('/payments', async (req, res) => {
+    try {
+        const payment = req.body;
+        const result = await paymentsCollection.insertOne(payment)
+
+        const membershipIdToAdd = payment.membershipId;
+
+        const query = {
+            email: payment.email
+        }
+        const update = {
+            $push: { membershipId: membershipIdToAdd }
+        }
+
+        const user = await userCollection.findOneAndUpdate(query, update)
+
+
+
+        res.send({ result, user })
+        console.log(result, user)
+    } catch (error) {
+        console.log(error)
     }
 })
 
