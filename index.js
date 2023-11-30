@@ -394,6 +394,8 @@ app.get('/requestMeals', verifyToken, async (req, res) => {
         const mealRequest = await mealRequestCollection.find(query).toArray();
         // res.send(result)
 
+
+
         const mealRequestIds = [];
         const getMealRequestIds = mealRequest.map(meal => {
             return mealRequestIds.push(meal.mealId)
@@ -407,7 +409,7 @@ app.get('/requestMeals', verifyToken, async (req, res) => {
         const reviewRes = await reviewsCollection.find(reviewsQuery).toArray()
 
         res.send({ result, reviewRes, mealRequest })
-        // console.log(result, reviewRes)
+        console.log(result, reviewRes)
     } catch (error) {
         console.log(error)
     }
@@ -458,6 +460,10 @@ app.post('/requestMeals', async (req, res) => {
         const requestData = req.body;
         const email = requestData.email;
         const mealId = requestData.mealId;
+        const emailQuery = {
+            email: email
+        }
+
         const query = {
             email: email,
             mealId: mealId
@@ -467,9 +473,9 @@ app.post('/requestMeals', async (req, res) => {
         if (exist?.status === 'pending') {
             return res.send({ massage: 'You have already request for this meal. wait until delivery.', insertedId: null })
         }
-        // if (exist) {
-        //     return res.send({ massage: 'You have already requested for this meal', insertedId: null })
-        // }
+        if (exist) {
+            return res.send({ massage: 'You have already requested for this meal', insertedId: null })
+        }
 
         const result = await mealRequestCollection.insertOne(requestData);
         res.send(result);
